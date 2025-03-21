@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::{sync::Arc, time::Duration};
+use std::{process::exit, sync::Arc, time::Duration};
 
 use anyhow::{bail, Context, Result};
 use arrow_array::{ArrayRef, Datum, RecordBatch, StringArray};
@@ -188,17 +188,28 @@ enum Command {
         #[clap(short, value_parser = parse_key_val)]
         params: Vec<(String, String)>,
     },
+
+    Authenticate,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
     setup_logging(args.logging_args)?;
-    let mut client = setup_client(args.client_args)
+    let client_args = args.client_args;
+
+    let mut client = setup_client(client_args.port, client_args.tls, client_args.host, client_args.headers, client_args.token)
         .await
         .context("setup client")?;
 
     let flight_info = match args.cmd {
+        Command::Authenticate => {
+            let username = client_args.username;
+            let password = client_args.password;
+            println!("{}", authenticate(username, password, &mut client).await);
+            FlightInfo::new()
+        },
         Command::Catalogs => client.get_catalogs().await.context("get catalogs")?,
         Command::DbSchemas {
             catalog,
@@ -259,6 +270,10 @@ async fn main() -> Result<()> {
                 .context("execute prepared statement")?
         }
     };
+
+    if flight_info == FlightInfo::new() {
+        exit(0);
+    }
 
     let batches = execute_flight(&mut client, flight_info)
         .await
@@ -341,12 +356,18 @@ fn setup_logging(args: LoggingArgs) -> Result<()> {
     Ok(())
 }
 
-async fn setup_client(args: ClientArgs) -> Result<FlightSqlServiceClient<Channel>> {
-    let port = args.port.unwrap_or(if args.tls { 443 } else { 80 });
+async fn setup_client(
+    port: Option<u16>,
+    tls: bool,
+    host: String,
+    headers: Vec<(String, String)>,
+    token: Option<String>
+) -> Result<FlightSqlServiceClient<Channel>> {
+    let port = port.unwrap_or(if tls { 443 } else { 80 });
 
-    let protocol = if args.tls { "https" } else { "http" };
+    let protocol = if tls { "https" } else { "http" };
 
-    let mut endpoint = Endpoint::new(format!("{}://{}:{}", protocol, args.host, port))
+    let mut endpoint = Endpoint::new(format!("{}://{}:{}", protocol, host, port))
         .context("create endpoint")?
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(20))
@@ -356,7 +377,7 @@ async fn setup_client(args: ClientArgs) -> Result<FlightSqlServiceClient<Channel
         .keep_alive_timeout(Duration::from_secs(20))
         .keep_alive_while_idle(true);
 
-    if args.tls {
+    if tls {
         let tls_config = ClientTlsConfig::new().with_enabled_roots();
         endpoint = endpoint
             .tls_config(tls_config)
@@ -368,33 +389,51 @@ async fn setup_client(args: ClientArgs) -> Result<FlightSqlServiceClient<Channel
     let mut client = FlightSqlServiceClient::new(channel);
     info!("connected");
 
-    for (k, v) in args.headers {
+    for (k, v) in headers {
         client.set_header(k, v);
     }
 
-    if let Some(token) = args.token {
+    if let Some(token) = token {
         client.set_token(token);
         info!("token set");
     }
 
-    match (args.username, args.password) {
-        (None, None) => {}
-        (Some(username), Some(password)) => {
-            client
-                .handshake(&username, &password)
-                .await
-                .context("handshake")?;
-            info!("performed handshake");
-        }
-        (Some(_), None) => {
-            bail!("when username is set, you also need to set a password")
-        }
-        (None, Some(_)) => {
-            bail!("when password is set, you also need to set a username")
-        }
-    }
+    // match (args.username, args.password) {
+    //     (None, None) => {}
+    //     (Some(username), Some(password)) => {
+    //         client
+    //             .handshake(&username, &password)
+    //             .await
+    //             .context("handshake")?;
+    //         info!("performed handshake");
+    //         println!("Token: {}", client.token().unwrap());
+    //     }
+    //     (Some(_), None) => {
+    //         bail!("when username is set, you also need to set a password")
+    //     }
+    //     (None, Some(_)) => {
+    //         bail!("when password is set, you also need to set a username")
+    //     }
+    // }
 
     Ok(client)
+}
+
+async fn authenticate(username: Option<String>, password: Option<String>, client: &mut FlightSqlServiceClient<Channel>) -> String {
+    match (username, password) {
+        (Some(username), Some(password)) => {
+            let token = client
+                .handshake(&username, &password)
+                .await
+                .unwrap();
+                // .context("handshake")?;
+            info!("performed handshake");
+            return String::from_utf8(token.to_vec()).unwrap();
+        }
+        (_, _) => { }
+    }
+
+    String::from("")
 }
 
 /// Parse a single key-value pair

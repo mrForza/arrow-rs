@@ -55,7 +55,7 @@ This crates offers a basic [Apache Arrow FlightSQL] command line interface.
 The client can be installed from the repository:
 
 ```console
-$ cargo install --features=cli,flight-sql-experimental,tls --bin=flight_sql_client --path=. --locked
+$ cargo install --features=cli,flight-sql-experimental,tls,tokio --bin=flight_sql_client --path=. --locked
 ```
 
 The client comes with extensive help text:
