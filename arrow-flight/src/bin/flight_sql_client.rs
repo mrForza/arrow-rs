@@ -96,6 +96,9 @@ struct ClientArgs {
     /// Defaults to `443` if `tls` is set, otherwise defaults to `80`.
     #[clap(long)]
     port: Option<u16>,
+
+    #[clap(long)]
+    silent: bool
 }
 
 #[derive(Debug, Parser)]
@@ -198,6 +201,7 @@ async fn main() -> Result<()> {
 
     setup_logging(args.logging_args)?;
     let client_args = args.client_args;
+    let silent = client_args.silent;
 
     let mut client = setup_client(client_args.port, client_args.tls, client_args.host, client_args.headers, client_args.token)
         .await
@@ -275,12 +279,17 @@ async fn main() -> Result<()> {
         exit(0);
     }
 
-    let batches = execute_flight(&mut client, flight_info)
-        .await
-        .context("read flight data")?;
+    let batches: Vec<RecordBatch> = execute_flight(&mut client, flight_info).await.unwrap();
 
-    let res = pretty_format_batches(batches.as_slice()).context("format results")?;
-    println!("{res}");
+    let rows_number = batches.iter().fold(0, |accumulator, batch| accumulator + batch.num_rows());
+
+    if !silent {
+        let res = pretty_format_batches(batches.as_slice()).context("format results")?;
+        println!("{res}\n");
+    }
+
+    println!("Number of rows: {}", rows_number);
+    
 
     Ok(())
 }

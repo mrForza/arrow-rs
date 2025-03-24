@@ -75,4 +75,23 @@ $ flight_sql_client --host example.com statement-query "SELECT 1;"
 +----------+
 ```
 
+A command to get token for tcs
+
+```
+flight_sql_client --host localhost --port 50051 --username ... --password ... authenticate
+```
+
+A query for tcs
+
+```console
+flight_sql_client --host localhost --port 50051 --token e0f1c051-16b7-40f7-bcf6-a6580ba3d14c statement-query "SELECT 1;"
+```
+
+A silent query for tcs
+
+```
+flight_sql_client --host localhost --port 50051 --token e0f1c051-16b7-40f7-bcf6-a6580ba3d14c --silent statement-query "SELECT 1;"
+```
+
 [apache arrow flightsql]: https://arrow.apache.org/docs/format/FlightSql.html
+
