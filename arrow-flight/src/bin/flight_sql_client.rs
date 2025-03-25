@@ -115,6 +115,7 @@ struct Args {
     cmd: Command,
 }
 
+
 /// Different available commands.
 #[derive(Debug, Subcommand)]
 enum Command {
@@ -191,8 +192,6 @@ enum Command {
         #[clap(short, value_parser = parse_key_val)]
         params: Vec<(String, String)>,
     },
-
-    Authenticate,
 }
 
 #[tokio::main]
@@ -203,17 +202,22 @@ async fn main() -> Result<()> {
     let client_args = args.client_args;
     let silent = client_args.silent;
 
-    let mut client = setup_client(client_args.port, client_args.tls, client_args.host, client_args.headers, client_args.token)
+    let username: Option<String> = client_args.username;
+    let password: Option<String> = client_args.password;
+    let token: Option<String> = client_args.token;
+
+    let mut client = setup_client(client_args.port, client_args.tls, client_args.host, client_args.headers, token.clone())
         .await
         .context("setup client")?;
 
+    if token.is_none() {
+        let raw_token = authenticate(username, password, &mut client).await;
+        println!("Token: {}", raw_token);
+        client.set_token(raw_token);
+    }
+
+
     let flight_info = match args.cmd {
-        Command::Authenticate => {
-            let username = client_args.username;
-            let password = client_args.password;
-            println!("{}", authenticate(username, password, &mut client).await);
-            FlightInfo::new()
-        },
         Command::Catalogs => client.get_catalogs().await.context("get catalogs")?,
         Command::DbSchemas {
             catalog,
@@ -331,6 +335,7 @@ fn construct_record_batch_from_params(
     parameter_schema: &Schema,
 ) -> Result<RecordBatch> {
     let mut items = Vec::<(&String, ArrayRef)>::new();
+
 
     for (name, value) in params {
         let field = parameter_schema.field_with_name(name)?;
@@ -452,6 +457,7 @@ fn parse_key_val(s: &str) -> Result<(String, String), String> {
         .ok_or_else(|| format!("invalid KEY=value: no `=` found in `{s}`"))?;
     Ok((s[..pos].to_owned(), s[pos + 1..].to_owned()))
 }
+
 
 /// Log headers/trailers.
 fn log_metadata(map: &MetadataMap, what: &'static str) {
