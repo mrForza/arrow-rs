@@ -75,19 +75,25 @@ $ flight_sql_client --host example.com statement-query "SELECT 1;"
 +----------+
 ```
 
-A command to get token for tcs
+A query for tcs with username + password authentication
 
 ```
-flight_sql_client --host localhost --port 50051 --username ... --password ... authenticate
+flight_sql_client --host localhost --port 50051 --username tcs --password tcs statement-query "SELECT 1;"
 ```
 
-A query for tcs
+A query for tcs with token authentication
 
 ```console
 flight_sql_client --host localhost --port 50051 --token e0f1c051-16b7-40f7-bcf6-a6580ba3d14c statement-query "SELECT 1;"
 ```
 
-A silent query for tcs
+A query for tcs with full keepalive and timeout options
+
+```
+flight_sql_client --host localhost --port 50051 --token e0f1c051-16b7-40f7-bcf6-a6580ba3d14c --tcp-keepalive 10000 --http2-keep-alive-interval 500 --keep-alive-timeout 50 statement-query "SELECT 1;"
+```
+
+A silent query (only number of rows)
 
 ```
 flight_sql_client --host localhost --port 50051 --token e0f1c051-16b7-40f7-bcf6-a6580ba3d14c --silent statement-query "SELECT 1;"

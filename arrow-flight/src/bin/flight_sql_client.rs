@@ -98,7 +98,16 @@ struct ClientArgs {
     port: Option<u16>,
 
     #[clap(long)]
-    silent: bool
+    silent: bool,
+
+    #[arg(long, default_value_t=3600)]
+    tcp_keepalive: u64,
+
+    #[arg(long, default_value_t=300)]
+    http2_keep_alive_interval: u64,
+    
+    #[arg(long, default_value_t=20)]
+    keep_alive_timeout: u64,
 }
 
 #[derive(Debug, Parser)]
@@ -115,6 +124,20 @@ struct Args {
     cmd: Command,
 }
 
+struct ConnectionConfig {
+    tcp_keepalive: u64,   
+    http2_keep_alive_interval: u64,  
+    keep_alive_timeout: u64 
+}
+impl ConnectionConfig {
+    pub fn new(tcp_keepalive: u64, http2_keep_alive_interval: u64, keep_alive_timeout: u64) -> Self {
+        Self {
+            tcp_keepalive,
+            http2_keep_alive_interval,
+            keep_alive_timeout
+        }
+    }
+}
 
 /// Different available commands.
 #[derive(Debug, Subcommand)]
@@ -206,7 +229,20 @@ async fn main() -> Result<()> {
     let password: Option<String> = client_args.password;
     let token: Option<String> = client_args.token;
 
-    let mut client = setup_client(client_args.port, client_args.tls, client_args.host, client_args.headers, token.clone())
+    let conn_config = ConnectionConfig::new(
+        client_args.tcp_keepalive,
+        client_args.http2_keep_alive_interval,
+        client_args.keep_alive_timeout
+    );
+
+    let mut client = setup_client(
+        client_args.port,
+        client_args.tls,
+        client_args.host,
+        client_args.headers,
+        token.clone(),
+        conn_config
+    )
         .await
         .context("setup client")?;
 
@@ -375,7 +411,8 @@ async fn setup_client(
     tls: bool,
     host: String,
     headers: Vec<(String, String)>,
-    token: Option<String>
+    token: Option<String>,
+    conn_config: ConnectionConfig
 ) -> Result<FlightSqlServiceClient<Channel>> {
     let port = port.unwrap_or(if tls { 443 } else { 80 });
 
@@ -386,9 +423,9 @@ async fn setup_client(
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(20))
         .tcp_nodelay(true) // Disable Nagle's Algorithm since we don't want packets to wait
-        .tcp_keepalive(Option::Some(Duration::from_secs(3600)))
-        .http2_keep_alive_interval(Duration::from_secs(300))
-        .keep_alive_timeout(Duration::from_secs(20))
+        .tcp_keepalive(Option::Some(Duration::from_secs(conn_config.tcp_keepalive)))
+        .http2_keep_alive_interval(Duration::from_secs(conn_config.http2_keep_alive_interval))
+        .keep_alive_timeout(Duration::from_secs(conn_config.keep_alive_timeout))
         .keep_alive_while_idle(true);
 
     if tls {
