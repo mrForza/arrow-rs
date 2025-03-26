@@ -100,13 +100,13 @@ struct ClientArgs {
     #[clap(long)]
     silent: bool,
 
-    #[arg(long, default_value_t=3600)]
+    #[arg(long, default_value_t = 3600)]
     keepalive: u64,
 
-    #[arg(long, default_value_t=300)]
+    #[arg(long, default_value_t = 300)]
     keepalive_interval: u64,
-    
-    #[arg(long, default_value_t=20)]
+
+    #[arg(long, default_value_t = 20)]
     timeout: u64,
 }
 
@@ -125,16 +125,16 @@ struct Args {
 }
 
 struct ConnectionConfig {
-    keepalive: u64,   
-    keepalive_interval: u64,  
-    timeout: u64 
+    keepalive: u64,
+    keepalive_interval: u64,
+    timeout: u64,
 }
 impl ConnectionConfig {
     pub fn new(keepalive: u64, keepalive_interval: u64, timeout: u64) -> Self {
         Self {
             keepalive,
             keepalive_interval,
-            timeout
+            timeout,
         }
     }
 }
@@ -215,6 +215,8 @@ enum Command {
         #[clap(short, value_parser = parse_key_val)]
         params: Vec<(String, String)>,
     },
+
+    Authenticate,
 }
 
 #[tokio::main]
@@ -232,7 +234,7 @@ async fn main() -> Result<()> {
     let conn_config = ConnectionConfig::new(
         client_args.keepalive,
         client_args.keepalive_interval,
-        client_args.timeout
+        client_args.timeout,
     );
 
     let mut client = setup_client(
@@ -240,88 +242,94 @@ async fn main() -> Result<()> {
         client_args.tls,
         client_args.host,
         client_args.headers,
-        token.clone(),
-        conn_config
+        conn_config,
     )
-        .await
-        .context("setup client")?;
-
-    if token.is_none() {
-        let raw_token = authenticate(username, password, &mut client).await;
-        println!("Token: {}", raw_token);
-        client.set_token(raw_token);
-    }
-
+    .await
+    .context("setup client")?;
 
     let flight_info = match args.cmd {
-        Command::Catalogs => client.get_catalogs().await.context("get catalogs")?,
-        Command::DbSchemas {
-            catalog,
-            db_schema_filter,
-        } => client
-            .get_db_schemas(CommandGetDbSchemas {
-                catalog: Some(catalog),
-                db_schema_filter_pattern: db_schema_filter,
-            })
-            .await
-            .context("get db schemas")?,
-        Command::Tables {
-            catalog,
-            db_schema_filter,
-            table_filter,
-            table_types,
-        } => client
-            .get_tables(CommandGetTables {
-                catalog: Some(catalog),
-                db_schema_filter_pattern: db_schema_filter,
-                table_name_filter_pattern: table_filter,
-                table_types,
-                // Schema is returned as ipc encoded bytes.
-                // We do not support returning the schema as there is no trivial mechanism
-                // to display the information to the user.
-                include_schema: false,
-            })
-            .await
-            .context("get tables")?,
-        Command::TableTypes => client.get_table_types().await.context("get table types")?,
-        Command::StatementQuery { query } => client
-            .execute(query, None)
-            .await
-            .context("execute statement")?,
-        Command::PreparedStatementQuery { query, params } => {
-            let mut prepared_stmt = client
-                .prepare(query, None)
-                .await
-                .context("prepare statement")?;
-
-            if !params.is_empty() {
-                prepared_stmt
-                    .set_parameters(
-                        construct_record_batch_from_params(
-                            &params,
-                            prepared_stmt
-                                .parameter_schema()
-                                .context("get parameter schema")?,
-                        )
-                        .context("construct parameters")?,
-                    )
-                    .context("bind parameters")?;
+        Command::Authenticate => {
+            if let (Some(username), Some(password)) = (username, password) {
+                let token = authenticate_with_creds(username, password, &mut client).await?;
+                println!("{token}");
+                return Ok(());
+            } else {
+                return bail!("provide username and password to authenticate");
             }
+        }
+        _ => {
+            try_authenticate(username, password, token, &mut client).await?;
+            let flight_info = match args.cmd {
+                Command::Catalogs => client.get_catalogs().await.context("get catalogs")?,
+                Command::DbSchemas {
+                    catalog,
+                    db_schema_filter,
+                } => client
+                    .get_db_schemas(CommandGetDbSchemas {
+                        catalog: Some(catalog),
+                        db_schema_filter_pattern: db_schema_filter,
+                    })
+                    .await
+                    .context("get db schemas")?,
+                Command::Tables {
+                    catalog,
+                    db_schema_filter,
+                    table_filter,
+                    table_types,
+                } => client
+                    .get_tables(CommandGetTables {
+                        catalog: Some(catalog),
+                        db_schema_filter_pattern: db_schema_filter,
+                        table_name_filter_pattern: table_filter,
+                        table_types,
+                        // Schema is returned as ipc encoded bytes.
+                        // We do not support returning the schema as there is no trivial mechanism
+                        // to display the information to the user.
+                        include_schema: false,
+                    })
+                    .await
+                    .context("get tables")?,
+                Command::TableTypes => client.get_table_types().await.context("get table types")?,
+                Command::StatementQuery { query } => client
+                    .execute(query, None)
+                    .await
+                    .context("execute statement")?,
+                Command::PreparedStatementQuery { query, params } => {
+                    let mut prepared_stmt = client
+                        .prepare(query, None)
+                        .await
+                        .context("prepare statement")?;
 
-            prepared_stmt
-                .execute()
-                .await
-                .context("execute prepared statement")?
+                    if !params.is_empty() {
+                        prepared_stmt
+                            .set_parameters(
+                                construct_record_batch_from_params(
+                                    &params,
+                                    prepared_stmt
+                                        .parameter_schema()
+                                        .context("get parameter schema")?,
+                                )
+                                .context("construct parameters")?,
+                            )
+                            .context("bind parameters")?;
+                    }
+
+                    prepared_stmt
+                        .execute()
+                        .await
+                        .context("execute prepared statement")?
+                }
+                _ => unimplemented!(),
+            };
+            flight_info
         }
     };
 
-    if flight_info == FlightInfo::new() {
-        exit(0);
-    }
-
     let batches: Vec<RecordBatch> = execute_flight(&mut client, flight_info).await.unwrap();
 
-    let rows_number = batches.iter().fold(0, |accumulator, batch| accumulator + batch.num_rows());
+    let rows_number = batches
+        .iter()
+        .fold(0, |accumulator, batch| accumulator + batch.num_rows());
 
     if !silent {
         let res = pretty_format_batches(batches.as_slice()).context("format results")?;
@@ -329,7 +337,6 @@ async fn main() -> Result<()> {
     }
 
     println!("Number of rows: {}", rows_number);
-    
 
     Ok(())
 }
@@ -372,7 +379,6 @@ fn construct_record_batch_from_params(
 ) -> Result<RecordBatch> {
     let mut items = Vec::<(&String, ArrayRef)>::new();
 
-
     for (name, value) in params {
         let field = parameter_schema.field_with_name(name)?;
         let value_as_array = StringArray::new_scalar(value);
@@ -411,8 +417,7 @@ async fn setup_client(
     tls: bool,
     host: String,
     headers: Vec<(String, String)>,
-    token: Option<String>,
-    conn_config: ConnectionConfig
+    conn_config: ConnectionConfig,
 ) -> Result<FlightSqlServiceClient<Channel>> {
     let port = port.unwrap_or(if tls { 443 } else { 80 });
 
@@ -444,11 +449,6 @@ async fn setup_client(
         client.set_header(k, v);
     }
 
-    if let Some(token) = token {
-        client.set_token(token);
-        info!("token set");
-    }
-
     // match (args.username, args.password) {
     //     (None, None) => {}
     //     (Some(username), Some(password)) => {
@@ -470,21 +470,40 @@ async fn setup_client(
     Ok(client)
 }
 
-async fn authenticate(username: Option<String>, password: Option<String>, client: &mut FlightSqlServiceClient<Channel>) -> String {
-    match (username, password) {
-        (Some(username), Some(password)) => {
-            let token = client
-                .handshake(&username, &password)
-                .await
-                .unwrap();
-                // .context("handshake")?;
-            info!("performed handshake");
-            return String::from_utf8(token.to_vec()).unwrap();
-        }
-        (_, _) => { }
+async fn try_authenticate(
+    username: Option<String>,
+    password: Option<String>,
+    token: Option<String>,
+    client: &mut FlightSqlServiceClient<Channel>,
+) -> Result<()> {
+    if let Some(token) = token {
+        client.set_token(token);
+        return Ok(());
     }
 
-    String::from("")
+    if let (Some(username), Some(password)) = (username, password) {
+        let token = authenticate_with_creds(username, password, client).await?;
+        client.set_token(token);
+        return Ok(());
+    }
+
+    bail!("provide username and password or token to authenticate")
+}
+
+async fn authenticate_with_creds(
+    username: String,
+    password: String,
+    client: &mut FlightSqlServiceClient<Channel>,
+) -> Result<String> {
+    let raw_token = client
+        .handshake(&username, &password)
+        .await
+        .context("handshake")?;
+    info!("performed handshake");
+
+    let token = String::from_utf8(raw_token.to_vec())?;
+
+    Ok(token)
 }
 
 /// Parse a single key-value pair
@@ -494,7 +513,6 @@ fn parse_key_val(s: &str) -> Result<(String, String), String> {
         .ok_or_else(|| format!("invalid KEY=value: no `=` found in `{s}`"))?;
     Ok((s[..pos].to_owned(), s[pos + 1..].to_owned()))
 }
-
 
 /// Log headers/trailers.
 fn log_metadata(map: &MetadataMap, what: &'static str) {
