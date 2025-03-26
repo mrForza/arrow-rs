@@ -90,7 +90,7 @@ flight_sql_client --host localhost --port 50051 --token e0f1c051-16b7-40f7-bcf6-
 A query for tcs with full keepalive and timeout options
 
 ```
-flight_sql_client --host localhost --port 50051 --token e0f1c051-16b7-40f7-bcf6-a6580ba3d14c --tcp-keepalive 10000 --http2-keep-alive-interval 500 --keep-alive-timeout 50 statement-query "SELECT 1;"
+flight_sql_client --host localhost --port 50051 --token e0f1c051-16b7-40f7-bcf6-a6580ba3d14c --keepalive 10000 --keepalive-interval 500 --timeout 50 statement-query "SELECT 1;"
 ```
 
 A silent query (only number of rows)

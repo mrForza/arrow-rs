@@ -101,13 +101,13 @@ struct ClientArgs {
     silent: bool,
 
     #[arg(long, default_value_t=3600)]
-    tcp_keepalive: u64,
+    keepalive: u64,
 
     #[arg(long, default_value_t=300)]
-    http2_keep_alive_interval: u64,
+    keepalive_interval: u64,
     
     #[arg(long, default_value_t=20)]
-    keep_alive_timeout: u64,
+    timeout: u64,
 }
 
 #[derive(Debug, Parser)]
@@ -125,16 +125,16 @@ struct Args {
 }
 
 struct ConnectionConfig {
-    tcp_keepalive: u64,   
-    http2_keep_alive_interval: u64,  
-    keep_alive_timeout: u64 
+    keepalive: u64,   
+    keepalive_interval: u64,  
+    timeout: u64 
 }
 impl ConnectionConfig {
-    pub fn new(tcp_keepalive: u64, http2_keep_alive_interval: u64, keep_alive_timeout: u64) -> Self {
+    pub fn new(keepalive: u64, keepalive_interval: u64, timeout: u64) -> Self {
         Self {
-            tcp_keepalive,
-            http2_keep_alive_interval,
-            keep_alive_timeout
+            keepalive,
+            keepalive_interval,
+            timeout
         }
     }
 }
@@ -230,9 +230,9 @@ async fn main() -> Result<()> {
     let token: Option<String> = client_args.token;
 
     let conn_config = ConnectionConfig::new(
-        client_args.tcp_keepalive,
-        client_args.http2_keep_alive_interval,
-        client_args.keep_alive_timeout
+        client_args.keepalive,
+        client_args.keepalive_interval,
+        client_args.timeout
     );
 
     let mut client = setup_client(
@@ -423,9 +423,9 @@ async fn setup_client(
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(20))
         .tcp_nodelay(true) // Disable Nagle's Algorithm since we don't want packets to wait
-        .tcp_keepalive(Option::Some(Duration::from_secs(conn_config.tcp_keepalive)))
-        .http2_keep_alive_interval(Duration::from_secs(conn_config.http2_keep_alive_interval))
-        .keep_alive_timeout(Duration::from_secs(conn_config.keep_alive_timeout))
+        .tcp_keepalive(Option::Some(Duration::from_secs(conn_config.keepalive)))
+        .http2_keep_alive_interval(Duration::from_secs(conn_config.keepalive_interval))
+        .keep_alive_timeout(Duration::from_secs(conn_config.timeout))
         .keep_alive_while_idle(true);
 
     if tls {
