@@ -34,6 +34,8 @@ use tonic::{
 };
 use tracing_log::log::info;
 
+const DEFAULT_CONNECT_TIMEOUT: u64 = 20;
+
 /// Logging CLI config.
 #[derive(Debug, Parser)]
 pub struct LoggingArgs {
@@ -425,8 +427,8 @@ async fn setup_client(
 
     let mut endpoint = Endpoint::new(format!("{}://{}:{}", protocol, host, port))
         .context("create endpoint")?
-        .connect_timeout(Duration::from_secs(20))
-        .timeout(Duration::from_secs(20))
+        .connect_timeout(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT))
+        .timeout(Duration::from_secs(conn_config.timeout))
         .tcp_nodelay(true) // Disable Nagle's Algorithm since we don't want packets to wait
         .tcp_keepalive(Option::Some(Duration::from_secs(conn_config.keepalive)))
         .http2_keep_alive_interval(Duration::from_secs(conn_config.keepalive_interval))
